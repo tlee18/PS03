@@ -1,6 +1,6 @@
 ---
 title: "STAT/MATH 495: Problem Set 03"
-author: "WRITE YOUR NAME HERE"
+author: "Tim Lee"
 date: "2017-09-26"
 output:
   html_document:
@@ -18,6 +18,7 @@ knitr::opts_chunk$set(echo = TRUE, fig.width=8, fig.height=4.5)
 library(tidyverse)
 data1 <- read_csv("data/data1.csv")
 data2 <- read_csv("data/data2.csv")
+set.seed(1996)
 ```
 
 
@@ -26,19 +27,259 @@ data2 <- read_csv("data/data2.csv")
 For both `data1` and `data2` tibbles (a tibble is a data frame with some
 [metadata](https://blog.rstudio.com/2016/03/24/tibble-1-0-0#tibbles-vs-data-frames) attached):
 
-* Find the splines model with the best out-of-sample predictive ability.
-* Create a visualizaztion arguing why you chose this particular model.
-* Create a visualizaztion of this model plotted over the given $(x_i, y_i)$ points for $i=1,\ldots,n=3000$.
-* Give your estimate $\widehat{\sigma}$ of $\sigma$ where the noise component $\epsilon_i$ is distributed with mean 0 and standard deviation $\sigma$.
+* (Q1) Find the splines model with the best out-of-sample predictive ability.
+* (Q2) Create a visualization arguing why you chose this particular model.
+* (Q3) Create a visualization of this model plotted over the given $(x_i, y_i)$ points for $i=1,\ldots,n=3000$.
+* (Q4) Give your estimate $\widehat{\sigma}$ of $\sigma$ where the noise component $\epsilon_i$ is distributed with mean 0 and standard deviation $\sigma$.
+
+
+# Introduction
+
+* We first want use crossvalidation to split the dataset into a training set and a test set. We can have `k` number of folds. To measure out-of-sample predictive ability, we will use Root Mean Squared Error. In the following function findBestRMSE(randomizedData, k, df), a list of the RMSE is returned based on the `k` number of folds and the `df` number of degrees of freedom. This function can be applied to both `data1` and `data2`.
+
+```{r}
+findBestRMSE <- function(randomizedData, k, df){
+  
+  #Initialize a list of RSME values (out-of-sample validity)
+  RMSElist <- c()
+  
+  
+  #Create 10 equally size folds
+  folds <- cut(seq(1,nrow(randomizedData)),breaks=k,labels=FALSE)
+  
+  
+  #Perform k-fold cross validation; in this case, k = 10
+  for(i in 1:k){
+    #Segment the randomized data by fold using the which() function 
+    testIndexes <- which(folds==i,arr.ind=TRUE)
+    trainData <- randomizedData[-testIndexes, ]
+    testData <- randomizedData[testIndexes, ]
+    
+    # Fit model using trainData
+    splines_model <- smooth.spline(x = trainData$x, y = trainData$y, df = df)
+    predK <- predict(splines_model, testData$x)
+    
+    # Calculate MSE 
+    mse <- (1/dim(trainData)[1]) * sum((predK$y - testData$y)^2)
+    
+    # Calculate RMSE
+    rmse <- sqrt(mse)
+    
+    # Compute RMSE 
+    RMSElist <- c(RMSElist, rmse)
+  }
+  
+  return(RMSElist)
+}
+
+```
 
 
 # Data 1
 
-```{r, echo=TRUE, warning=FALSE, message=FALSE}
+## (Q1) Find the splines model with the best out-of-sample predictive ability.
+
+
+* The initial inputs are written here. The data are randomized so that I can do the k-number of folds. 
+
+
+```{r}
+# The rows of data are shuffled so that there can be k-number of folds. 
+randomizedData <- data1[sample(nrow(data1)),]
+
+
+
+# The initial inputs can be changed here.
+k <- 10
+dfStart <- 2
+dfEnd <- 80
+
+
+
+# A list of the RMSE values for each degree of freedom is calculated. 
+# Afterwards, the minimum 
+rmseValList <- c()
+for(i in dfStart:dfEnd){
+  rmseList <- findBestRMSE(randomizedData, k = k, df = i)
+  rmseVal <- sum(rmseList)/k
+  rmseValList <- c(rmseValList, rmseVal)
+}
+
+dfPlot <- data.frame(df = dfStart:dfEnd, RMSE = rmseValList)
+minDfIndex <- which.min(dfPlot$RMSE) #returns index
+minDf <- dfPlot[[minDfIndex, 1]]
+minDfVal <- dfPlot[[minDfIndex, 2]]
+
+minDf; minDfVal
 ```
+
+
+## (Q2) Create a visualizaztion arguing why you chose this particular model.
+
+
+* The results of the for-loop indicate that the degrees of freedom that minimizes the RMSE (out-of-sample validity) occur at 33 with a lowest RSME of 5.007. This indicates that the spline model that best fits occurs with df = 33. 
+
+
+* A visualization was made to clarify the results. Because RMSE should be minimized, the best model would be the point in the graph where we see the lowest "dip." This occurs at the area we specified earlier. 
+
+```{r}
+ggplot(dfPlot, aes(x = df, y = RMSE)) + 
+  geom_line(color = "blue") +
+  geom_vline(xintercept = minDf) +
+  geom_hline(yintercept = minDfVal) +
+  labs(title = "RMSE as a Function of the Degrees of Freedom", x = "Degrees of Freedom (df)", y = "RMSE")
+
+```
+
+
+
+## (Q3) Create a visualization of this model plotted over the given $(x_i, y_i)$ points for $i=1,\ldots,n=3000$.
+
+
+* Now we plot all the points from 1 to 3000 with the model that we created from above. In addition, we overlay the spline model that we identified earlier as the best-fitting degrees of freedom. In addition, since this was a 10-fold crossvalidation, the best fold was used as the model placed over the entire 3,000-entry dataset. 
+
+
+```{r}
+
+# Identify the fold at k=10 that has the lowest RMSE.
+df <- minDf
+minFold <- which.min(findBestRMSE(randomizedData, k = k, df = minDf))
+minFold # the fold that gives the best model
+
+folds <- cut(seq(1,nrow(randomizedData)),breaks=k,labels=FALSE)
+testIndexes <- which(folds==minFold,arr.ind=TRUE)
+trainData <- randomizedData[-testIndexes, ]
+testData <- randomizedData[testIndexes, ]
+
+overall <- smooth.spline(trainData$x, trainData$y, df=df) %>%
+    broom::augment() %>%
+    mutate(df=df)
+
+
+
+
+# Plot the spline model over the original dataset.
+
+ggplot(data1, aes(x = x, y = y)) + geom_point(size = 0.5) +
+  geom_line(data = overall, aes(y=.fitted), col="blue", size=1) +
+  labs(title = "Spline Model Overlayed on Entire Dataset", x = "x", y = "y")
+
+```
+
+
+## (Q4) Give your estimate $\widehat{\sigma}$ of $\sigma$ where the noise component $\epsilon_i$ is distributed with mean 0 and standard deviation $\sigma$.
+
+
+*  $\widehat{\sigma} = 5.007$ 
+
+
+* The RMSE would be the estimate $\widehat{\sigma}$ of $\sigma$. In other words, for the problem specifically, the value would just be taking the squared difference between the predicted and actual values, dividing it by n entries, and finding the square root of the entire value. 
+
+
+
+
+
+
 
 # Data 2
 
-```{r, echo=TRUE, warning=FALSE, message=FALSE}
+## (Q1) Find the splines model with the best out-of-sample predictive ability.
+
+
+* The initial inputs are written here. The data are randomized so that I can do the k-number of folds. 
+
+
+```{r}
+# The rows of data are shuffled so that there can be k-number of folds. 
+randomizedData <- data2[sample(nrow(data2)),]
+
+
+
+# The initial inputs can be changed here.
+k <- 10
+dfStart <- 2
+dfEnd <- 80
+
+
+
+# A list of the RMSE values for each degree of freedom is calculated. 
+# Afterwards, the minimum 
+rmseValList <- c()
+for(i in dfStart:dfEnd){
+  rmseList <- findBestRMSE(randomizedData, k = k, df = i)
+  rmseVal <- sum(rmseList)/k
+  rmseValList <- c(rmseValList, rmseVal)
+}
+
+dfPlot <- data.frame(df = dfStart:dfEnd, RMSE = rmseValList)
+minDfIndex <- which.min(dfPlot$RMSE) #returns index
+minDf <- dfPlot[[minDfIndex, 1]]
+minDfVal <- dfPlot[[minDfIndex, 2]]
+
+minDf; minDfVal
 ```
+
+
+## (Q2) Create a visualizaztion arguing why you chose this particular model.
+
+
+* The results of the for-loop indicate that the degrees of freedom that minimizes the RMSE (out-of-sample validity) occur at 28 with a lowest RSME of 8.304. This indicates that the spline model that best fits occurs with df = 28 
+
+
+* A visualization was made to clarify the results. Because RMSE should be minimized, the best model would be the point in the graph where we see the lowest "dip." This occurs at the area we specified earlier. 
+
+```{r}
+ggplot(dfPlot, aes(x = df, y = RMSE)) + 
+  geom_line(color = "blue") +
+  geom_vline(xintercept = minDf) +
+  geom_hline(yintercept = minDfVal) +
+  labs(title = "RMSE as a Function of the Degrees of Freedom", x = "Degrees of Freedom (df)", y = "RMSE")
+
+```
+
+
+
+## (Q3) Create a visualization of this model plotted over the given $(x_i, y_i)$ points for $i=1,\ldots,n=3000$.
+
+
+* Now we plot all the points from 1 to 3000 with the model that we created from above. In addition, we overlay the spline model that we identified earlier as the best-fitting degrees of freedom. In addition, since this was a 10-fold crossvalidation, the best fold was used as the model placed over the entire 3,000-entry dataset. 
+
+
+```{r}
+
+# Identify the fold at k=10 that has the lowest RMSE.
+df <- minDf
+minFold <- which.min(findBestRMSE(randomizedData, k = k, df = minDf))
+minFold # the fold that gives the best model
+
+folds <- cut(seq(1,nrow(randomizedData)),breaks=k,labels=FALSE)
+testIndexes <- which(folds==minFold,arr.ind=TRUE)
+trainData <- randomizedData[-testIndexes, ]
+testData <- randomizedData[testIndexes, ]
+
+overall <- smooth.spline(trainData$x, trainData$y, df=df) %>%
+    broom::augment() %>%
+    mutate(df=df)
+
+
+
+
+# Plot the spline model over the original dataset.
+
+ggplot(data1, aes(x = x, y = y)) + geom_point(size = 0.5) +
+  geom_line(data = overall, aes(y=.fitted), col="blue", size=1) +
+  labs(title = "Spline Model Overlayed on Entire Dataset", x = "x", y = "y")
+
+```
+
+
+
+## (Q4) Give your estimate $\widehat{\sigma}$ of $\sigma$ where the noise component $\epsilon_i$ is distributed with mean 0 and standard deviation $\sigma$.
+
+
+*  $\widehat{\sigma} = 8.304$ 
+
+
+* The RMSE would be the estimate $\widehat{\sigma}$ of $\sigma$. In other words, for the problem specifically, the value would just be taking the squared difference between the predicted and actual values, dividing it by n entries, and finding the square root of the entire value. 
+
 
